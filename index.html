@@ -6,8 +6,6 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <!-- Lobby -->
   <div id="lobby">
     <h1>PORRADARIA</h1>
     <input id="nameInput" type="text" maxlength="16" placeholder="seu nome" autocomplete="off" />
@@ -15,13 +13,11 @@
     <button id="joinBtn">entrar</button>
   </div>
 
-  <!-- Game -->
   <div id="gameWrap">
     <canvas id="canvas" width="900" height="650"></canvas>
     <div id="hud">setas · mouse = direção · lmb = soco esq · rmb = soco dir · lmb+rmb = empurrão</div>
   </div>
 
-  <!-- Death -->
   <div id="deathScreen" style="display:none;flex-direction:column;align-items:center;justify-content:center;">
     <h2>K.O.</h2>
     <p>você foi eliminado</p>
@@ -29,7 +25,6 @@
   </div>
 
   <script>
-// ─── Config (espelhado do servidor) ────────────────────────
 const FIST_REACH  = 38;
 const FIST_OFFSET = 14;
 const PUSH_REACH  = 30;
@@ -38,27 +33,22 @@ let FIST_RADIUS   = 8;
 let worldW = 1600, worldH = 1200;
 let ring = { x: 0, y: 0, size: 700 };
 
-// Viewport (tamanho fixo do canvas, a câmera segue o jogador dentro do mundo maior)
-const VIEW_W = 900, VIEW_H = 650;
+const VIEW_W = 1080, VIEW_H = 720;
 let camX = 0, camY = 0;
 
-// ─── State ─────────────────────────────────────────────────
 let ws        = null;
 let myId      = null;
 let gameState = [];
 
-// ─── Cor aleatória ─────────────────────────────────────────
 function randomColor() {
   const h = Math.floor(Math.random() * 360);
   return `hsl(${h},70%,60%)`;
 }
 const myColor = randomColor();
 
-// ─── Input ─────────────────────────────────────────────────
 const keys = { up: false, down: false, left: false, right: false };
 let mouseAngle = 0;
 
-// Estado físico real dos botões do mouse (atualizado nos eventos)
 const mouseDown = { left: false, right: false };
 
 document.addEventListener("keydown", e => {
@@ -75,7 +65,6 @@ document.addEventListener("keyup", e => {
   if (e.key === "ArrowRight") keys.right = false;
 });
 
-// ─── Canvas ────────────────────────────────────────────────
 const canvas = document.getElementById("canvas");
 const ctx    = canvas.getContext("2d");
 
@@ -97,16 +86,11 @@ canvas.addEventListener("mouseup", e => {
   syncButtonsFromEvent(e);
 });
 
-// e.buttons é um bitmask com TODOS os botões pressionados no momento do
-// evento (bit 0 = esquerdo, bit 1 = direito), então reflete corretamente
-// o caso de clique simultâneo, mesmo que o navegador dispare mousedown
-// do botão esquerdo e direito em eventos separados.
 function syncButtonsFromEvent(e) {
   mouseDown.left  = (e.buttons & 1) !== 0;
   mouseDown.right = (e.buttons & 2) !== 0;
 }
 
-// Se o mouse saĩr da janela com botão pressionado, soltamos para não travar o estado
 window.addEventListener("blur", () => {
   mouseDown.left  = false;
   mouseDown.right = false;
@@ -114,12 +98,6 @@ window.addEventListener("blur", () => {
 
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 
-// ─── Envio de input 30hz ───────────────────────────────────
-// Lemos o estado físico atual dos botões (mouseDown) a cada envio.
-// Antes, punchLeft/punchRight eram variáveis soltas que podiam ficar
-// "presas" entre eventos; agora refletem exatamente o que está
-// pressionado no momento do envio, então clicar os dois botões ao
-// mesmo tempo sempre manda ambos true no mesmo pacote.
 setInterval(() => {
   if (!ws || ws.readyState !== WebSocket.OPEN || myId === null) return;
 
@@ -158,7 +136,6 @@ function drawPlayer(p) {
       ctx.fillRect(px - pushFr, py - pushFr, pushFr * 2, pushFr * 2);
     }
   } else {
-    // Punhos (soco normal) — luvas vermelhas, mais claras quando socando
     for (const side of ["left", "right"]) {
       const fp       = fistPos(p, side);
       const fsx      = fp.x - camX;
@@ -169,11 +146,9 @@ function drawPlayer(p) {
     }
   }
 
-  // Corpo
   ctx.fillStyle = p.color;
   ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
 
-  // HP bar
   const bw   = 36, bh = 3;
   const bx   = sx - bw / 2;
   const by   = sy - r - 10;
@@ -183,7 +158,6 @@ function drawPlayer(p) {
   ctx.fillStyle = "#eee";
   ctx.fillRect(bx, by, bw * frac, bh);
 
-  // Nome
   ctx.fillStyle = isMe ? "#fff" : "#666";
   ctx.font      = "9px monospace";
   ctx.textAlign = "center";
@@ -198,11 +172,9 @@ function updateCamera() {
 }
 
 function drawRing() {
-  // Lona (chão do ringue) — vermelho escuro
   ctx.fillStyle = "#3b0a0a";
   ctx.fillRect(ring.x - camX, ring.y - camY, ring.size, ring.size);
 
-  // Cordas (borda) — vermelho vivo
   ctx.strokeStyle = "#e6194b";
   ctx.lineWidth = 3;
   ctx.strokeRect(ring.x - camX, ring.y - camY, ring.size, ring.size);
@@ -211,7 +183,6 @@ function drawRing() {
 function render() {
   updateCamera();
 
-  // Fundo do mundo (fora do ringue)
   ctx.fillStyle = "#050505";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
@@ -221,7 +192,6 @@ function render() {
   requestAnimationFrame(render);
 }
 
-// ─── Join ──────────────────────────────────────────────────
 function doJoin() {
   const name  = document.getElementById("nameInput").value.trim();
   const errEl = document.getElementById("lobbyError");

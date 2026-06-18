@@ -7,10 +7,8 @@ const PORT = 8080;
 
 const app = express();
 
-// Serve os arquivos estáticos (index.html, style.css, etc) da raiz do projeto
 app.use(express.static(__dirname));
 
-// Fallback explícito pra raiz, por clareza (express.static já cobre isso)
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
@@ -18,45 +16,37 @@ app.get("/", (req, res) => {
 const httpServer = http.createServer(app);
 
 const MAX_PLAYERS = 15;
-const TICK_RATE = 60; // ms
+const TICK_RATE = 60;
 const WORLD_W = 1600;
 const WORLD_H = 1200;
 const PLAYER_RADIUS = 18;
 const FIST_RADIUS = 8;
 const FIST_REACH = 38;
-const FIST_OFFSET = 14; // lateral offset from center
+const FIST_OFFSET = 14;
 const PUNCH_DAMAGE = 10;
-const PUNCH_COOLDOWN = 400; // ms
+const PUNCH_COOLDOWN = 400;
 const MAX_HP = 100;
 const MOVE_SPEED = 20;
 
-// Ringue (área central, puramente visual por enquanto — não limita o movimento)
 const RING_SIZE = 700;
 const RING_X = (WORLD_W - RING_SIZE) / 2;
 const RING_Y = (WORLD_H - RING_SIZE) / 2;
 
-// Knockback
-const PUNCH_KNOCKBACK = 5; // empurrão leve de um soco normal
-const PUSH_KNOCKBACK = 26; // empurrão forte (os dois botões juntos)
-const KNOCKBACK_DECAY = 0.85; // o quanto a velocidade decai por tick
+const PUNCH_KNOCKBACK = 5; 
+const PUSH_KNOCKBACK = 26; 
+const KNOCKBACK_DECAY = 0.85; 
 
-// Empurrão de duas mãos (push)
-const PUSH_REACH = 30; // alcance frontal do empurrão
-const PUSH_RADIUS = 24; // "largura" da hitbox do empurrão
-const PUSH_COOLDOWN = 600; // ms
-const PUSH_ACTIVE_TIME = 150; // ms
+const PUSH_REACH = 30; 
+const PUSH_RADIUS = 24; 
+const PUSH_COOLDOWN = 600;
+const PUSH_ACTIVE_TIME = 150;
 
-// Colisão entre jogadores
-const PUSH_STRENGTH = 0.5; // 0..1, o quanto resolve o overlap por tick
+const PUSH_STRENGTH = 0.5; 
 const wss = new WebSocket.Server({ server: httpServer });
-const players = new Map(); // id -> player state
+const players = new Map(); 
 
 let nextId = 1;
 
-// Paleta de cores bem distintas entre si (uma por slot de jogador), pra
-// garantir que nenhum boneco fique com cor parecida com a de outro —
-// diferente de antes, quando cada cliente sorteava um hue aleatório e
-// podia colidir com a cor de outro jogador.
 const DISTINCT_COLORS = [
   "#e6194b", "#3cb44b", "#4363d8", "#f58231",
   "#911eb4", "#42d4f4", "#f032e6", "#bfef45",
@@ -72,8 +62,6 @@ function assignColor() {
       return { color: DISTINCT_COLORS[i], slot: i };
     }
   }
-  // Mais jogadores que cores na paleta (não deveria acontecer, MAX_PLAYERS
-  // é igual ao tamanho da paleta) — cai pra um cinza neutro.
   return { color: "#cccccc", slot: -1 };
 }
 
@@ -89,23 +77,18 @@ function createPlayer(id, name, color, colorSlot) {
     colorSlot,
     x: RING_X + PLAYER_RADIUS + 20 + Math.random() * (RING_SIZE - 2 * PLAYER_RADIUS - 40),
     y: RING_Y + PLAYER_RADIUS + 20 + Math.random() * (RING_SIZE - 2 * PLAYER_RADIUS - 40),
-    angle: 0, // radians, direction player is facing
+    angle: 0, 
     hp: MAX_HP,
-    // knockback velocity (decai a cada tick)
     vx: 0,
     vy: 0,
-    // input state
     keys: { up: false, down: false, left: false, right: false },
-    // punch animation state
     leftPunch: { active: false, timer: 0, cooldown: 0 },
     rightPunch: { active: false, timer: 0, cooldown: 0 },
-    // empurrão de duas mãos (os dois botões pressionados ao mesmo tempo)
     push: { active: false, timer: 0, cooldown: 0, hitThisPush: false },
   };
 }
 
 function fistWorldPos(player, side) {
-  // side: 'left' | 'right'
   const sign = side === "left" ? -1 : 1;
   const lateralAngle = player.angle + Math.PI / 2;
   const forwardAngle = player.angle;
@@ -126,7 +109,6 @@ function fistWorldPos(player, side) {
 }
 
 function pushWorldPos(player) {
-  // Ponto na frente do jogador, na direção que ele está virado
   return {
     x: player.x + Math.cos(player.angle) * PUSH_REACH,
     y: player.y + Math.sin(player.angle) * PUSH_REACH,
@@ -160,10 +142,8 @@ function killPlayer(id) {
   }
 }
 
-// Game loop
 setInterval(() => {
   for (const [id, p] of players) {
-    // Movement (input do jogador)
     let dx = 0,
       dy = 0;
     if (p.keys.up) dy -= MOVE_SPEED;
@@ -176,11 +156,9 @@ setInterval(() => {
       dy *= 0.707;
     }
 
-    // Soma o knockback (velocidade de impacto) ao deslocamento
     dx += p.vx;
     dy += p.vy;
 
-    // Decai a velocidade de knockback pro próximo tick
     p.vx *= KNOCKBACK_DECAY;
     p.vy *= KNOCKBACK_DECAY;
     if (Math.abs(p.vx) < 0.05) p.vx = 0;
@@ -189,7 +167,6 @@ setInterval(() => {
     p.x = Math.max(PLAYER_RADIUS, Math.min(WORLD_W - PLAYER_RADIUS, p.x + dx));
     p.y = Math.max(PLAYER_RADIUS, Math.min(WORLD_H - PLAYER_RADIUS, p.y + dy));
 
-    // Punch timers
     for (const side of ["left", "right"]) {
       const punch = side === "left" ? p.leftPunch : p.rightPunch;
       if (punch.active) {
@@ -203,7 +180,6 @@ setInterval(() => {
       }
     }
 
-    // Push timer (empurrão de duas mãos)
     if (p.push.active) {
       p.push.timer -= TICK_RATE;
       if (p.push.timer <= 0) {
@@ -215,7 +191,6 @@ setInterval(() => {
     }
   }
 
-  // Resolução de colisão entre jogadores (push-apart simples)
   const ids = [...players.keys()];
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
@@ -238,7 +213,6 @@ setInterval(() => {
   }
 
   for (const [id, p] of players) {
-    // Saiu do ringue = eliminado na hora
     const outOfRing =
       p.x < RING_X || p.x > RING_X + RING_SIZE ||
       p.y < RING_Y || p.y > RING_Y + RING_SIZE;
@@ -247,7 +221,6 @@ setInterval(() => {
       continue;
     }
 
-    // Check fists hitting other players
     for (const side of ["left", "right"]) {
       const punch = side === "left" ? p.leftPunch : p.rightPunch;
       if (!punch.active || punch.hitThisPunch) continue;
@@ -259,7 +232,6 @@ setInterval(() => {
           punch.hitThisPunch = true;
           other.hp = Math.max(0, other.hp - PUNCH_DAMAGE);
 
-          // Knockback leve: empurra a vítima na direção atacante -> vítima
           const kx = other.x - p.x;
           const ky = other.y - p.y;
           const kd = Math.hypot(kx, ky) || 0.001;
@@ -273,7 +245,6 @@ setInterval(() => {
       }
     }
 
-    // Check push (empurrão de duas mãos) hitting other players
     if (p.push.active && !p.push.hitThisPush) {
       const shove = pushWorldPos(p);
       for (const [otherId, other] of players) {
@@ -281,7 +252,6 @@ setInterval(() => {
         if (dist(shove.x, shove.y, other.x, other.y) < PLAYER_RADIUS + PUSH_RADIUS) {
           p.push.hitThisPush = true;
 
-          // Knockback forte, sem dano
           const kx = other.x - p.x;
           const ky = other.y - p.y;
           const kd = Math.hypot(kx, ky) || 0.001;
@@ -295,7 +265,6 @@ setInterval(() => {
     }
   }
 
-  // Broadcast state
   const state = [];
   for (const [, p] of players) {
     state.push({
@@ -321,7 +290,6 @@ wss.on("connection", (ws) => {
     return;
   }
 
-  // Wait for join message
   ws.once("message", (raw) => {
     let msg;
     try {
@@ -354,7 +322,6 @@ wss.on("connection", (ws) => {
 
     broadcast({ type: "player_joined", id, name: player.name, color: player.color });
 
-    // Input messages
     ws.on("message", (raw2) => {
       let m;
       try {
@@ -373,20 +340,18 @@ wss.on("connection", (ws) => {
         const bothPressed = !!m.punchLeft && !!m.punchRight;
 
         if (bothPressed) {
-          // Empurrão de duas mãos: dispara push, ignora socos individuais
           if (!p.push.active && p.push.cooldown <= 0) {
             p.push.active = true;
             p.push.timer = PUSH_ACTIVE_TIME;
             p.push.hitThisPush = false;
           }
         } else {
-          // Socos individuais (comportamento normal)
           for (const side of ["left", "right"]) {
             const punching = side === "left" ? m.punchLeft : m.punchRight;
             const punch = side === "left" ? p.leftPunch : p.rightPunch;
             if (punching && !punch.active && punch.cooldown <= 0) {
               punch.active = true;
-              punch.timer = 150; // ms punch is "extended"
+              punch.timer = 150;
               punch.hitThisPunch = false;
             }
           }

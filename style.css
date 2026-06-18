@@ -10,7 +10,6 @@ body {
   user-select: none;
 }
 
-/* ── Lobby ── */
 #lobby {
   display: flex;
   flex-direction: column;
@@ -72,7 +71,6 @@ canvas { display: block; cursor: crosshair; }
   padding: 6px 0;
 }
 
-/* ── Death ── */
 #deathScreen {
   display: none;
   position: fixed;
