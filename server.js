@@ -1,23 +1,21 @@
 const WebSocket = require("ws");
+const express = require("express");
 const http = require("http");
-const fs = require("fs");
 const path = require("path");
 
 const PORT = 8080;
 
-const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css" };
+const app = express();
 
-const httpServer = http.createServer((req, res) => {
-  const url      = req.url === "/" ? "/index.html" : req.url;
-  const ext      = path.extname(url);
-  const filePath = path.join(__dirname, url);
+// Serve os arquivos estáticos (index.html, style.css, etc) da raiz do projeto
+app.use(express.static(__dirname));
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end("not found"); return; }
-    res.writeHead(200, { "Content-Type": MIME[ext] || "text/plain" });
-    res.end(data);
-  });
+// Fallback explícito pra raiz, por clareza (express.static já cobre isso)
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
 });
+
+const httpServer = http.createServer(app);
 
 const MAX_PLAYERS = 15;
 const TICK_RATE = 60; // ms
@@ -55,11 +53,40 @@ const players = new Map(); // id -> player state
 
 let nextId = 1;
 
-function createPlayer(id, name, color) {
+// Paleta de cores bem distintas entre si (uma por slot de jogador), pra
+// garantir que nenhum boneco fique com cor parecida com a de outro —
+// diferente de antes, quando cada cliente sorteava um hue aleatório e
+// podia colidir com a cor de outro jogador.
+const DISTINCT_COLORS = [
+  "#e6194b", "#3cb44b", "#4363d8", "#f58231",
+  "#911eb4", "#42d4f4", "#f032e6", "#bfef45",
+  "#fabed4", "#469990", "#9A6324", "#800000",
+  "#aaffc3", "#808000", "#ffd8b1",
+];
+const usedColorSlots = new Set();
+
+function assignColor() {
+  for (let i = 0; i < DISTINCT_COLORS.length; i++) {
+    if (!usedColorSlots.has(i)) {
+      usedColorSlots.add(i);
+      return { color: DISTINCT_COLORS[i], slot: i };
+    }
+  }
+  // Mais jogadores que cores na paleta (não deveria acontecer, MAX_PLAYERS
+  // é igual ao tamanho da paleta) — cai pra um cinza neutro.
+  return { color: "#cccccc", slot: -1 };
+}
+
+function releaseColor(slot) {
+  if (slot >= 0) usedColorSlots.delete(slot);
+}
+
+function createPlayer(id, name, color, colorSlot) {
   return {
     id,
     name: name.slice(0, 16),
     color,
+    colorSlot,
     x: RING_X + PLAYER_RADIUS + 20 + Math.random() * (RING_SIZE - 2 * PLAYER_RADIUS - 40),
     y: RING_Y + PLAYER_RADIUS + 20 + Math.random() * (RING_SIZE - 2 * PLAYER_RADIUS - 40),
     angle: 0, // radians, direction player is facing
@@ -123,6 +150,8 @@ function sendTo(ws, data) {
 
 function killPlayer(id) {
   const entry = [...wss.clients].find((ws) => ws.playerId === id);
+  const dead = players.get(id);
+  if (dead) releaseColor(dead.colorSlot);
   players.delete(id);
   broadcast({ type: "player_left", id });
   if (entry) {
@@ -302,14 +331,15 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    if (msg.type !== "join" || !msg.name || !msg.color) {
+    if (msg.type !== "join" || !msg.name) {
       ws.close();
       return;
     }
 
     const id = nextId++;
     ws.playerId = id;
-    const player = createPlayer(id, msg.name, msg.color);
+    const { color, slot } = assignColor();
+    const player = createPlayer(id, msg.name, color, slot);
     players.set(id, player);
 
     sendTo(ws, {
@@ -365,6 +395,8 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
+      const leaving = players.get(id);
+      if (leaving) releaseColor(leaving.colorSlot);
       players.delete(id);
       broadcast({ type: "player_left", id });
     });

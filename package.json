@@ -1,14 +1,14 @@
 {
-  "name": "game",
+  "name": "porradaria",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
+  "description": "Jogo de luta multiplayer em ringue (canvas + websocket + express)",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "ws": "^8.21.0"
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
   }
 }
