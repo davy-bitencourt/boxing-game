@@ -17,18 +17,19 @@ const httpServer = http.createServer(app);
 
 const MAX_PLAYERS = 15;
 const TICK_RATE = 60;
-const WORLD_W = 1600;
-const WORLD_H = 1200;
+const WORLD_W = 1080;
+const WORLD_H = 720;
 const PLAYER_RADIUS = 18;
+const HIT_RADIUS = 26;
 const FIST_RADIUS = 8;
 const FIST_REACH = 38;
 const FIST_OFFSET = 14;
-const PUNCH_DAMAGE = 10;
-const PUNCH_COOLDOWN = 400;
+const PUNCH_DAMAGE = 15;
+const PUNCH_COOLDOWN = 200;
 const MAX_HP = 100;
-const MOVE_SPEED = 20;
+const MOVE_SPEED = 22;
 
-const RING_SIZE = 700;
+const RING_SIZE = 600;
 const RING_X = (WORLD_W - RING_SIZE) / 2;
 const RING_Y = (WORLD_H - RING_SIZE) / 2;
 
@@ -38,7 +39,7 @@ const KNOCKBACK_DECAY = 0.85;
 
 const PUSH_REACH = 30; 
 const PUSH_RADIUS = 24; 
-const PUSH_COOLDOWN = 600;
+const PUSH_COOLDOWN = 300;
 const PUSH_ACTIVE_TIME = 150;
 
 const PUSH_STRENGTH = 0.5; 
@@ -91,20 +92,12 @@ function createPlayer(id, name, color, colorSlot) {
 function fistWorldPos(player, side) {
   const sign = side === "left" ? -1 : 1;
   const lateralAngle = player.angle + Math.PI / 2;
-  const forwardAngle = player.angle;
-
   const punch = side === "left" ? player.leftPunch : player.rightPunch;
   const extension = punch.active ? FIST_REACH : FIST_REACH * 0.5;
 
   return {
-    x:
-      player.x +
-      Math.cos(forwardAngle) * extension +
-      Math.cos(lateralAngle) * FIST_OFFSET * sign,
-    y:
-      player.y +
-      Math.sin(forwardAngle) * extension +
-      Math.sin(lateralAngle) * FIST_OFFSET * sign,
+    x: player.x + Math.cos(player.angle) * extension + Math.cos(lateralAngle) * FIST_OFFSET * sign,
+    y: player.y + Math.sin(player.angle) * extension + Math.sin(lateralAngle) * FIST_OFFSET * sign,
   };
 }
 
@@ -144,12 +137,19 @@ function killPlayer(id) {
 
 setInterval(() => {
   for (const [id, p] of players) {
-    let dx = 0,
-      dy = 0;
-    if (p.keys.up) dy -= MOVE_SPEED;
-    if (p.keys.down) dy += MOVE_SPEED;
-    if (p.keys.left) dx -= MOVE_SPEED;
-    if (p.keys.right) dx += MOVE_SPEED;
+    let dirX = 0,
+      dirY = 0;
+    if (p.keys.up) dirY -= 1;
+    if (p.keys.down) dirY += 1;
+    if (p.keys.left) dirX -= 1;
+    if (p.keys.right) dirX += 1;
+
+    if (dirX !== 0 || dirY !== 0) {
+      p.angle = Math.atan2(dirY, dirX);
+    }
+
+    let dx = dirX * MOVE_SPEED;
+    let dy = dirY * MOVE_SPEED;
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;
@@ -199,7 +199,7 @@ setInterval(() => {
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const d = Math.hypot(dx, dy) || 0.001;
-      const minDist = PLAYER_RADIUS * 2;
+      const minDist = HIT_RADIUS * 2;
       if (d < minDist) {
         const overlap = (minDist - d) * PUSH_STRENGTH;
         const nx = dx / d;
@@ -228,7 +228,7 @@ setInterval(() => {
       const fist = fistWorldPos(p, side);
       for (const [otherId, other] of players) {
         if (otherId === id) continue;
-        if (dist(fist.x, fist.y, other.x, other.y) < PLAYER_RADIUS + FIST_RADIUS) {
+        if (dist(fist.x, fist.y, other.x, other.y) < HIT_RADIUS + FIST_RADIUS) {
           punch.hitThisPunch = true;
           other.hp = Math.max(0, other.hp - PUNCH_DAMAGE);
 
@@ -238,7 +238,6 @@ setInterval(() => {
           other.vx += (kx / kd) * PUNCH_KNOCKBACK;
           other.vy += (ky / kd) * PUNCH_KNOCKBACK;
 
-          broadcast({ type: "hit", victim: otherId, attacker: id, hp: other.hp });
           if (other.hp <= 0) killPlayer(otherId);
           break;
         }
@@ -249,7 +248,7 @@ setInterval(() => {
       const shove = pushWorldPos(p);
       for (const [otherId, other] of players) {
         if (otherId === id) continue;
-        if (dist(shove.x, shove.y, other.x, other.y) < PLAYER_RADIUS + PUSH_RADIUS) {
+        if (dist(shove.x, shove.y, other.x, other.y) < HIT_RADIUS + PUSH_RADIUS) {
           p.push.hitThisPush = true;
 
           const kx = other.x - p.x;
@@ -257,8 +256,6 @@ setInterval(() => {
           const kd = Math.hypot(kx, ky) || 0.001;
           other.vx += (kx / kd) * PUSH_KNOCKBACK;
           other.vy += (ky / kd) * PUSH_KNOCKBACK;
-
-          broadcast({ type: "pushed", victim: otherId, attacker: id });
           break;
         }
       }
@@ -320,8 +317,6 @@ wss.on("connection", (ws) => {
       ring: { x: RING_X, y: RING_Y, size: RING_SIZE },
     });
 
-    broadcast({ type: "player_joined", id, name: player.name, color: player.color });
-
     ws.on("message", (raw2) => {
       let m;
       try {
@@ -335,7 +330,6 @@ wss.on("connection", (ws) => {
 
       if (m.type === "input") {
         if (m.keys) p.keys = m.keys;
-        if (typeof m.angle === "number") p.angle = m.angle;
 
         const bothPressed = !!m.punchLeft && !!m.punchRight;
 
