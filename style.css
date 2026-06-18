@@ -1,0 +1,95 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: black;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  user-select: none;
+}
+
+/* ── Lobby ── */
+#lobby {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: center;
+  padding: 40px 48px;
+  min-width: 280px;
+}
+
+#lobby h1 {
+  font-size: 2rem;
+  letter-spacing: 8px;
+  color: #fff;
+}
+
+#lobby input[type="text"] {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #444;
+  color: #fff;
+  font-size: 1rem;
+  padding: 6px 0;
+  width: 100%;
+  outline: none;
+  text-align: center;
+  letter-spacing: 2px;
+}
+
+#lobby input[type="text"]::placeholder { color: #333; }
+#lobby input[type="text"]:focus { border-bottom-color: #fff; }
+
+#joinBtn {
+  background: none;
+  color: #fff;
+  border: 1px solid #444;
+  font-family: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  padding: 8px 28px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+#joinBtn:hover { border-color: #fff; }
+
+#lobbyError { color: #e63030; font-size: 0.75rem; min-height: 1rem; text-align: center; }
+
+/* ── Game ── */
+#gameWrap { display: none; flex-direction: column; align-items: center; }
+
+canvas { display: block; cursor: crosshair; }
+
+#hud {
+  font-size: 0.6rem;
+  letter-spacing: 2px;
+  color: #333;
+  padding: 6px 0;
+}
+
+/* ── Death ── */
+#deathScreen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.9);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#deathScreen h2 { color: #fff; font-size: 2rem; letter-spacing: 10px; }
+#deathScreen p  { color: #444; font-size: 0.75rem; letter-spacing: 3px; }
+#deathScreen button {
+  background: none; color: #fff; border: 1px solid #444;
+  font-family: inherit; font-size: 0.75rem; letter-spacing: 4px;
+  text-transform: uppercase; padding: 8px 24px; cursor: pointer;
+  margin-top: 8px;
+}
+#deathScreen button:hover { border-color: #fff; }

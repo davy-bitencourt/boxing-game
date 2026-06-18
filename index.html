@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Porradaria</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Lobby -->
+  <div id="lobby">
+    <h1>PORRADARIA</h1>
+    <input id="nameInput" type="text" maxlength="16" placeholder="seu nome" autocomplete="off" />
+    <div id="lobbyError"></div>
+    <button id="joinBtn">entrar</button>
+  </div>
+
+  <!-- Game -->
+  <div id="gameWrap">
+    <canvas id="canvas" width="900" height="650"></canvas>
+    <div id="hud">setas · mouse = direção · lmb = soco esq · rmb = soco dir · lmb+rmb = empurrão</div>
+  </div>
+
+  <!-- Death -->
+  <div id="deathScreen" style="display:none;flex-direction:column;align-items:center;justify-content:center;">
+    <h2>K.O.</h2>
+    <p>você foi eliminado</p>
+    <button onclick="location.reload()">jogar de novo</button>
+  </div>
+
+  <script>
+// ─── Config (espelhado do servidor) ────────────────────────
+const FIST_REACH  = 38;
+const FIST_OFFSET = 14;
+const PUSH_REACH  = 30;
+let PLAYER_RADIUS = 18;
+let FIST_RADIUS   = 8;
+let worldW = 1600, worldH = 1200;
+let ring = { x: 0, y: 0, size: 700 };
+
+// Viewport (tamanho fixo do canvas, a câmera segue o jogador dentro do mundo maior)
+const VIEW_W = 900, VIEW_H = 650;
+let camX = 0, camY = 0;
+
+// ─── State ─────────────────────────────────────────────────
+let ws        = null;
+let myId      = null;
+let gameState = [];
+
+// ─── Cor aleatória ─────────────────────────────────────────
+function randomColor() {
+  const h = Math.floor(Math.random() * 360);
+  return `hsl(${h},70%,60%)`;
+}
+const myColor = randomColor();
+
+// ─── Input ─────────────────────────────────────────────────
+const keys = { up: false, down: false, left: false, right: false };
+let mouseAngle = 0;
+
+// Estado físico real dos botões do mouse (atualizado nos eventos)
+const mouseDown = { left: false, right: false };
+
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowUp")    { keys.up    = true; e.preventDefault(); }
+  if (e.key === "ArrowDown")  { keys.down  = true; e.preventDefault(); }
+  if (e.key === "ArrowLeft")  { keys.left  = true; e.preventDefault(); }
+  if (e.key === "ArrowRight") { keys.right = true; e.preventDefault(); }
+});
+
+document.addEventListener("keyup", e => {
+  if (e.key === "ArrowUp")    keys.up    = false;
+  if (e.key === "ArrowDown")  keys.down  = false;
+  if (e.key === "ArrowLeft")  keys.left  = false;
+  if (e.key === "ArrowRight") keys.right = false;
+});
+
+// ─── Canvas ────────────────────────────────────────────────
+const canvas = document.getElementById("canvas");
+const ctx    = canvas.getContext("2d");
+
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  const me   = gameState.find(p => p.id === myId);
+  if (!me) return;
+  const screenX = e.clientX - rect.left;
+  const screenY = e.clientY - rect.top;
+  mouseAngle = Math.atan2(screenY - (me.y - camY), screenX - (me.x - camX));
+});
+
+canvas.addEventListener("mousedown", e => {
+  e.preventDefault();
+  syncButtonsFromEvent(e);
+});
+
+canvas.addEventListener("mouseup", e => {
+  syncButtonsFromEvent(e);
+});
+
+// e.buttons é um bitmask com TODOS os botões pressionados no momento do
+// evento (bit 0 = esquerdo, bit 1 = direito), então reflete corretamente
+// o caso de clique simultâneo, mesmo que o navegador dispare mousedown
+// do botão esquerdo e direito em eventos separados.
+function syncButtonsFromEvent(e) {
+  mouseDown.left  = (e.buttons & 1) !== 0;
+  mouseDown.right = (e.buttons & 2) !== 0;
+}
+
+// Se o mouse saĩr da janela com botão pressionado, soltamos para não travar o estado
+window.addEventListener("blur", () => {
+  mouseDown.left  = false;
+  mouseDown.right = false;
+});
+
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+// ─── Envio de input 30hz ───────────────────────────────────
+// Lemos o estado físico atual dos botões (mouseDown) a cada envio.
+// Antes, punchLeft/punchRight eram variáveis soltas que podiam ficar
+// "presas" entre eventos; agora refletem exatamente o que está
+// pressionado no momento do envio, então clicar os dois botões ao
+// mesmo tempo sempre manda ambos true no mesmo pacote.
+setInterval(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN || myId === null) return;
+
+  const punchLeft  = mouseDown.left;
+  const punchRight = mouseDown.right;
+
+  ws.send(JSON.stringify({ type: "input", keys: { ...keys }, angle: mouseAngle, punchLeft, punchRight }));
+}, 33);
+
+// ─── Render ────────────────────────────────────────────────
+function fistPos(p, side) {
+  const sign = side === "left" ? -1 : 1;
+  const lat  = p.angle + Math.PI / 2;
+  const ext  = (side === "left" ? p.leftPunch : p.rightPunch) ? FIST_REACH : FIST_REACH * 0.5;
+  return {
+    x: p.x + Math.cos(p.angle) * ext + Math.cos(lat) * FIST_OFFSET * sign,
+    y: p.y + Math.sin(p.angle) * ext + Math.sin(lat) * FIST_OFFSET * sign,
+  };
+}
+
+function drawPlayer(p) {
+  const isMe = p.id === myId;
+  const r    = PLAYER_RADIUS;
+  const fr   = FIST_RADIUS;
+  const sx   = p.x - camX; // posição na tela
+  const sy   = p.y - camY;
+
+  if (p.pushing) {
+    // Empurrão de duas mãos: desenha as duas mãos juntas, esticadas pra frente
+    const pushFr = fr * 1.4;
+    const lat = p.angle + Math.PI / 2;
+    for (const sign of [-1, 1]) {
+      const px = p.x + Math.cos(p.angle) * PUSH_REACH + Math.cos(lat) * 10 * sign - camX;
+      const py = p.y + Math.sin(p.angle) * PUSH_REACH + Math.sin(lat) * 10 * sign - camY;
+      ctx.fillStyle = "#eee";
+      ctx.fillRect(px - pushFr, py - pushFr, pushFr * 2, pushFr * 2);
+    }
+  } else {
+    // Punhos (soco normal)
+    for (const side of ["left", "right"]) {
+      const fp       = fistPos(p, side);
+      const fsx      = fp.x - camX;
+      const fsy      = fp.y - camY;
+      const punching = side === "left" ? p.leftPunch : p.rightPunch;
+      ctx.fillStyle  = punching ? "#eee" : "#555";
+      ctx.fillRect(fsx - fr, fsy - fr, fr * 2, fr * 2);
+    }
+  }
+
+  // Corpo
+  ctx.fillStyle = p.color;
+  ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+
+  // HP bar
+  const bw   = 36, bh = 3;
+  const bx   = sx - bw / 2;
+  const by   = sy - r - 10;
+  const frac = Math.max(0, p.hp / 100);
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = "#eee";
+  ctx.fillRect(bx, by, bw * frac, bh);
+
+  // Nome
+  ctx.fillStyle = isMe ? "#fff" : "#666";
+  ctx.font      = "9px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(p.name, sx, by - 3);
+}
+
+function updateCamera() {
+  const me = gameState.find(p => p.id === myId);
+  if (!me) return;
+  camX = Math.max(0, Math.min(worldW - VIEW_W, me.x - VIEW_W / 2));
+  camY = Math.max(0, Math.min(worldH - VIEW_H, me.y - VIEW_H / 2));
+}
+
+function drawRing() {
+  // Lona (chão do ringue)
+  ctx.fillStyle = "#1c1c1c";
+  ctx.fillRect(ring.x - camX, ring.y - camY, ring.size, ring.size);
+
+  // Cordas (borda)
+  ctx.strokeStyle = "#555";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(ring.x - camX, ring.y - camY, ring.size, ring.size);
+}
+
+function render() {
+  updateCamera();
+
+  // Fundo do mundo (fora do ringue)
+  ctx.fillStyle = "#050505";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  drawRing();
+
+  gameState.forEach(drawPlayer);
+  requestAnimationFrame(render);
+}
+
+// ─── Join ──────────────────────────────────────────────────
+function doJoin() {
+  const name  = document.getElementById("nameInput").value.trim();
+  const errEl = document.getElementById("lobbyError");
+  if (!name) { errEl.textContent = "coloque um nome"; return; }
+  errEl.textContent = "";
+
+  ws = new WebSocket(`ws://${location.host}`);
+
+  ws.addEventListener("open", () => {
+    ws.send(JSON.stringify({ type: "join", name, color: myColor }));
+  });
+
+  ws.addEventListener("message", e => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "error") { errEl.textContent = msg.msg; ws.close(); return; }
+
+    if (msg.type === "welcome") {
+      myId          = msg.id;
+      worldW        = msg.worldW;
+      worldH        = msg.worldH;
+      PLAYER_RADIUS = msg.playerRadius;
+      FIST_RADIUS   = msg.fistRadius;
+      if (msg.ring) ring = msg.ring;
+      canvas.width  = VIEW_W;
+      canvas.height = VIEW_H;
+      document.getElementById("lobby").style.display    = "none";
+      document.getElementById("gameWrap").style.display = "flex";
+      render();
+    }
+
+    if (msg.type === "state")    gameState = msg.players;
+    if (msg.type === "you_died") document.getElementById("deathScreen").style.display = "flex";
+  });
+
+  ws.addEventListener("close", () => {
+    if (myId !== null) document.getElementById("deathScreen").style.display = "flex";
+  });
+
+  ws.addEventListener("error", () => {
+    errEl.textContent = "não foi possível conectar. servidor está rodando?";
+  });
+}
+
+document.getElementById("joinBtn").addEventListener("click", doJoin);
+document.getElementById("nameInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") doJoin();
+});
+  </script>
+</body>
+</html>
